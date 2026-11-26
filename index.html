@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Interactive carbon-ion SOBP model: physical dose, RBE-weighted dose, RBE, ion fluence and LET versus depth.">
+<title>Carbon SOBP Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<style>
+/* Layout: one instrument panel. Controls strip → dose/RBE chart, shared depth slider, fluence/LET chart (all on one x-scale) → readouts. */
+:root{
+  --bg:#f3f5f6;
+  --panel:#ffffff;
+  --ink:#16202a;
+  --muted:#5b6873;
+  --rule:#d9dfe3;
+  --grid:#e8ecef;
+  --band:rgba(31,79,216,.07);
+  /* line palette: hue-separated, colour-vision-deficiency-aware (Okabe–Ito family) */
+  --phys:#1f4fd8;   /* physical dose: blue */
+  --bio:#c2338a;    /* RBE-weighted dose: reddish purple */
+  --rbe:#e08a00;    /* RBE: orange */
+  --flu:#009e73;    /* ion fluence: bluish green */
+  --let:#d55e00;    /* LET: vermilion */
+  --track:#dfe5e9;
+  --focus:#1f4fd8;
+  --font-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-data:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1418; --panel:#161d22; --ink:#e3e8ec; --muted:#93a0aa; --rule:#2a343c; --grid:#1f282f;
+    --band:rgba(111,155,255,.10); --phys:#6f9bff; --bio:#f07cc0; --rbe:#ffb02e; --flu:#3fd3a0; --let:#ff7a3d; --track:#2a343c; --focus:#6f9bff;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1418; --panel:#161d22; --ink:#e3e8ec; --muted:#93a0aa; --rule:#2a343c; --grid:#1f282f;
+  --band:rgba(111,155,255,.10); --phys:#6f9bff; --bio:#f07cc0; --rbe:#ffb02e; --flu:#3fd3a0; --let:#ff7a3d; --track:#2a343c; --focus:#6f9bff;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.5}
+.wrap{max-width:1080px;margin:0 auto;padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+header{display:grid;gap:4px}
+h1{font-family:var(--font-display);font-weight:600;font-size:1.75rem;letter-spacing:.01em;margin:0;text-wrap:balance}
+.sub{color:var(--muted);margin:0;max-width:68ch}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px}
+.controls{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;padding:12px 16px}
+.ctl{display:flex;align-items:center;gap:10px;min-width:0}
+.ctl label,.lbl{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:500}
+.ctl output{white-space:nowrap;font-family:var(--font-data);font-variant-numeric:tabular-nums;font-size:.9rem;min-width:7.5ch}
+input[type=range]{accent-color:var(--bio);width:170px;max-width:100%}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.seg button{font:inherit;font-size:.82rem;background:transparent;color:var(--muted);border:0;padding:5px 10px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.seg button+button{border-left:1px solid var(--rule)}
+button:focus-visible,input:focus-visible,[role=slider]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.chartcard{padding:12px 12px 16px;display:grid;gap:6px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 20px;padding:0 4px;font-size:.84rem}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.sw{width:22px;height:0;border-top:2.5px solid;display:inline-block}
+.sw.dash{border-top-style:dashed;border-top-width:1.5px}
+.chart{position:relative;width:100%}
+canvas{display:block;width:100%;touch-action:pan-y;cursor:crosshair}
+#cv{height:400px}
+#cv2{height:370px}
+.charthead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px;padding:2px 4px 0}
+.charthead h2{font-family:var(--font-display);font-weight:600;font-size:1rem;margin:0;letter-spacing:.01em}
+.chart2{border-top:1px solid var(--rule);margin-top:10px;padding-top:12px;display:grid;gap:6px}
+/* dual-handle depth slider, positioned in JS to match the plot area */
+.rangebox{position:relative;height:54px}
+.track{position:absolute;top:14px;height:6px;border-radius:3px;background:var(--track)}
+.fill{position:absolute;top:0;bottom:0;background:var(--phys);opacity:.55;border-radius:3px;cursor:grab;touch-action:none}
+.fill:active{cursor:grabbing}
+.handle{position:absolute;top:50%;width:20px;height:20px;margin-left:-10px;margin-top:-10px;border-radius:50%;background:var(--panel);border:2.5px solid var(--phys);cursor:ew-resize;touch-action:none;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.handle::after{content:"";position:absolute;inset:-10px}
+.htag{position:absolute;top:28px;transform:translateX(-50%);font-family:var(--font-data);font-size:.76rem;color:var(--ink);white-space:nowrap;pointer-events:none}
+.htag small{color:var(--muted);font-family:var(--font-body);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;margin-right:4px}
+.hint{font-size:.78rem;color:var(--muted);padding:0 4px}
+.readouts{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,2fr);gap:16px}
+@media (max-width:760px){.readouts{grid-template-columns:minmax(0,1fr)}}
+.probe,.stats{padding:14px 16px;display:grid;gap:10px;align-content:start}
+.probe h2,.stats h2,.notes h2{font-family:var(--font-display);font-weight:600;font-size:1rem;margin:0;letter-spacing:.01em}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:.88rem}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--font-data);font-variant-numeric:tabular-nums;text-align:right}
+.statgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.stat{background:var(--panel);padding:10px 12px;display:grid;gap:2px}
+.stat .v{font-family:var(--font-data);font-size:1.25rem;font-variant-numeric:tabular-nums}
+.stat .d{font-size:.74rem;color:var(--muted);line-height:1.35}
+.c-phys{color:var(--phys)}.c-bio{color:var(--bio)}.c-rbe{color:var(--rbe)}.c-flu{color:var(--flu)}.c-let{color:var(--let)}
+.notes{padding:4px 16px}
+.notes summary{cursor:pointer;padding:10px 0;font-family:var(--font-display);font-weight:600}
+.notes ul{margin:0 0 14px;padding-left:18px;color:var(--muted);max-width:80ch;display:grid;gap:4px;font-size:.86rem}
+.notes code{font-family:var(--font-data);font-size:.82rem;color:var(--ink)}
+@media (max-width:900px) and (min-width:481px){.statgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){#cv{height:330px}#cv2{height:310px}h1{font-size:1.45rem}.statgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Carbon SOBP Explorer</h1>
+    <p class="sub">A biologically flat carbon-ion SOBP built from weighted pristine Bragg peaks. Drag the start and end of the SOBP and watch the physical dose tilt, the RBE rise with depth, and the ion fluence and LET that drive both.</p>
+  </header>
+
+  <section class="panel controls" aria-label="Plan settings">
+    <div class="ctl">
+      <label for="dose">Prescription</label>
+      <input id="dose" type="range" min="1" max="8" step="0.1" value="3.6">
+      <output id="doseOut" for="dose">3.6 Gy(RBE)</output>
+    </div>
+    <div class="ctl">
+      <span class="lbl" id="scaleLbl">Dose axes</span>
+      <div class="seg" role="group" aria-labelledby="scaleLbl">
+        <button id="scaleSep" aria-pressed="true">Separate</button>
+        <button id="scaleCommon" aria-pressed="false">Common</button>
+      </div>
+    </div>
+    <div class="ctl"><div class="seg"><button id="reset">Reset</button></div></div>
+  </section>
+
+  <section class="panel chartcard" aria-label="Depth profile">
+    <div class="charthead"><h2>Dose and RBE</h2></div>
+    <div class="legend">
+      <span><i class="sw" style="border-color:var(--phys)"></i>Physical dose, Gy</span>
+      <span><i class="sw" style="border-color:var(--bio)"></i>RBE-weighted dose, Gy(RBE)</span>
+      <span><i class="sw" style="border-color:var(--rbe)"></i>RBE</span>
+    </div>
+    <div class="chart" id="chart">
+      <canvas id="cv" aria-label="Depth–dose chart of physical dose, RBE-weighted dose and RBE"></canvas>
+      <div class="rangebox" id="rangebox">
+        <div class="track" id="track">
+          <div class="fill" id="fill" title="Drag to move the whole SOBP"></div>
+          <div class="handle" id="h1" role="slider" tabindex="0" aria-label="SOBP proximal edge (cm)"></div>
+          <div class="handle" id="h2" role="slider" tabindex="0" aria-label="SOBP distal edge (cm)"></div>
+        </div>
+        <div class="htag" id="t1"></div>
+        <div class="htag" id="t2"></div>
+      </div>
+    </div>
+    <div class="hint">Drag either handle to set the proximal and distal edges, or drag the bar between them to shift the SOBP. Arrow keys move a focused handle by 0.2 cm. The slider sets the SOBP for both charts.</div>
+    <div class="chart2">
+      <div class="charthead">
+        <h2>Fluence, LET and physical dose</h2>
+        <div class="ctl">
+          <span class="lbl" id="peaksLbl">Pristine beams</span>
+          <div class="seg" role="group" aria-labelledby="peaksLbl">
+            <button id="peaks3" aria-pressed="true">3 shown</button>
+            <button id="peaksAll" aria-pressed="false">All</button>
+            <button id="peaksNone" aria-pressed="false">Hide</button>
+          </div>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i class="sw" style="border-color:var(--phys)"></i>Physical dose, Gy</span>
+        <span><i class="sw" style="border-color:var(--flu)"></i>Primary carbon fluence Φ, <span id="fluUnit">×10⁷ ions/cm²</span></span>
+        <span><i class="sw" style="border-color:var(--let)"></i>Dose-averaged LET, keV/µm</span>
+        <span><i class="sw dash" style="border-color:var(--phys)"></i>Pristine beam dose</span>
+        <span><i class="sw dash" style="border-color:var(--flu)"></i>Pristine beam fluence</span>
+      </div>
+      <canvas id="cv2" aria-label="Depth profile of primary carbon fluence, dose-averaged LET and physical dose with pristine beam components"></canvas>
+      <div class="hint">Each dashed pristine beam keeps a nearly constant fluence until its ions stop, while its dose climbs into a Bragg peak. Shallower beams stop first, so fluence steps down through the SOBP as LET climbs.</div>
+    </div>
+  </section>
+
+  <div class="readouts">
+    <section class="panel probe" aria-live="polite">
+      <h2 id="probeTitle">At mid-SOBP</h2>
+      <dl class="kv">
+        <dt>Depth</dt><dd id="pz">–</dd>
+        <dt class="c-phys">Physical dose</dt><dd id="pd">–</dd>
+        <dt class="c-bio">RBE-weighted dose</dt><dd id="pb">–</dd>
+        <dt class="c-rbe">RBE</dt><dd id="pr">–</dd>
+        <dt class="c-flu">Primary fluence</dt><dd id="pf">–</dd>
+        <dt class="c-let">Dose-averaged LET</dt><dd id="pl">–</dd>
+      </dl>
+      <div class="hint" style="padding:0">Hover or touch either chart to read any depth.</div>
+    </section>
+    <section class="panel stats">
+      <h2>Across this SOBP</h2>
+      <div class="statgrid">
+        <div class="stat"><span class="lbl">Entrance RBE</span><span class="v c-rbe" id="sEnt">–</span><span class="d">at 1 cm depth</span></div>
+        <div class="stat"><span class="lbl">Proximal RBE</span><span class="v c-rbe" id="sPro">–</span><span class="d">0.3 cm inside the proximal edge</span></div>
+        <div class="stat"><span class="lbl">Mid RBE</span><span class="v c-rbe" id="sMid">–</span><span class="d">SOBP centre</span></div>
+        <div class="stat"><span class="lbl">Distal RBE</span><span class="v c-rbe" id="sDis">–</span><span class="d">0.5 cm inside the distal edge</span></div>
+        <div class="stat"><span class="lbl">Physical tilt</span><span class="v c-phys" id="sTilt">–</span><span class="d">proximal ÷ distal physical dose</span></div>
+        <div class="stat"><span class="lbl">Fluence drop</span><span class="v c-flu" id="sFlu">–</span><span class="d">proximal ÷ distal primary fluence</span></div>
+        <div class="stat"><span class="lbl">LET rise</span><span class="v c-let" id="sLet">–</span><span class="d">distal ÷ proximal LETd</span></div>
+        <div class="stat"><span class="lbl">Entrance / target</span><span class="v c-bio" id="sEtr">–</span><span class="d">RBE-weighted dose at 1 cm ÷ prescription</span></div>
+      </div>
+    </section>
+  </div>
+
+  <details class="panel notes">
+    <summary>Model assumptions</summary>
+    <ul>
+      <li>Toy model for teaching, not a treatment planning calculation. Absolute values are illustrative; the directions of change are the point.</li>
+      <li>Pristine peaks: Bragg–Kleeman stopping power <code>S ∝ (R−z)^(1/p−1)</code>, <code>p = 1.77</code>, Gaussian range straggling widened by a ripple filter (σ ≈ 0.2 cm), primary fluence attenuated as <code>exp(−z/28 cm)</code>.</li>
+      <li>Fragments: dose builds up with depth as primaries are lost and continues past each peak as an exponential tail. Fragment LET is fixed at 12 keV/µm.</li>
+      <li>Primary LET follows the same power law: about 13 keV/µm at 16 cm residual range, rising to well over 100 keV/µm in the last millimetre.</li>
+      <li>Fluence: primary carbon ions only. Each beam's fluence is set by its weight through <code>Φ = D / (1.602×10⁻⁹ · LET)</code> (Gy, keV/µm, ions/cm², water), falls by nuclear attenuation with depth, and drops to zero across its straggled range (error-function edge). Fragment fluence is not plotted, although fragment dose and LET are included in the dose and LETd curves.</li>
+      <li>Biology: HSG-like reference cells, photon α = 0.313 Gy⁻¹, β = 0.0615 Gy⁻². Carbon α rises with dose-averaged LET above 8 keV/µm with an overkill roll-off; β is held equal to the photon value (mixed-beam rule).</li>
+      <li>RBE is solved from LQ isoeffect at the local physical dose, so it also depends on the prescription per fraction.</li>
+      <li>Peak weights are a non-negative, lightly smoothed least-squares fit to the physical dose each depth needs. The fit and the LET-dependent RBE are iterated until RBE × physical dose is flat across the SOBP. The default 3.6 Gy(RBE) per fraction matches a common 57.6 Gy(RBE)/16 fraction prostate schedule.</li>
+    </ul>
+  </details>
+</div>
+
+<script>
+(() => {
+// ================= physics / biology model =================
+const P={spacing:0.2,ripple:0.2,lam:28,frag:0.9,tail:6,L0:13,Lfrag:12,ax:0.313,bx:0.0615,k:0.058,Lov:250,Lt:8,reg:0.01,sweeps:150,damp:0.3};
+const dz=0.02, ZMAX=26, N=Math.round(ZMAX/dz)+1;
+const Z=new Float64Array(N); for(let i=0;i<N;i++) Z[i]=i*dz;
+  const ex=1/1.77-1; const cache=new Map();
+  function erfc(x){const s=x<0; x=Math.abs(x); const t=1/(1+0.3275911*x);
+    const y=t*(0.254829592+t*(-0.284496736+t*(1.421413741+t*(-1.453152027+t*1.061405429))))*Math.exp(-x*x); return s?2-y:y;}
+  function beam(k){
+    if(cache.has(k))return cache.get(k);
+    const R=k*P.spacing, sig=Math.sqrt((0.0035*R)**2+P.ripple**2);
+    const raw=new Float64Array(N), rawL=new Float64Array(N), norm=Math.pow(R,ex);
+    // bin-averaged (analytic) integrals of the singular stopping-power terms
+    const e1=ex+1, e2=2*ex+1, cL=P.L0*Math.pow(16,-ex);
+    for(let i=0;i<N;i++){const hi=R-Z[i]+dz/2; if(hi<=0)break; const lo=Math.max(0,R-Z[i]-dz/2);
+      const att=Math.exp(-Z[i]/P.lam)/norm/dz;
+      raw[i]=att*(Math.pow(hi,e1)-Math.pow(lo,e1))/e1;
+      rawL[i]=att*cL*(Math.pow(hi,e2)-Math.pow(lo,e2))/e2;}
+    const h=Math.ceil(4*sig/dz), w=[]; for(let j=-h;j<=h;j++) w.push(Math.exp(-0.5*(j*dz/sig)**2));
+    const T=new Float64Array(N), TL=new Float64Array(N), F=new Float64Array(N), fR=P.frag*(1-Math.exp(-R/P.lam));
+    const Le=P.L0*Math.pow(R/16,ex), phi0=1/(1.602e-9*Le); // ions/cm² per Gy of entrance primary dose
+    for(let i=0;i<N;i++) F[i]=phi0*Math.exp(-Z[i]/P.lam)*0.5*erfc((Z[i]-R)/(Math.SQRT2*sig));
+    for(let i=0;i<N;i++){let a=0,b=0,ws=0;
+      for(let j=-h;j<=h;j++){const q=i+j; if(q<0||q>=N)continue; a+=raw[q]*w[j+h]; b+=rawL[q]*w[j+h]; ws+=w[j+h];}
+      a/=ws; b/=ws; const z=Z[i];
+      const f=z<R?P.frag*(1-Math.exp(-z/P.lam)):fR*Math.exp(-(z-R)/P.tail);
+      T[i]=a+f; TL[i]=b+f*P.Lfrag;}
+    const out={R,T,TL,F}; cache.set(k,out); return out;
+  }
+  const alphaC=L=>P.ax*(1+P.k*Math.max(0,L-P.Lt)*Math.exp(-L/P.Lov));
+  function solve(z1,z2,B,outer){
+    const k1=Math.round(z1/P.spacing),k2=Math.round(z2/P.spacing);
+    const beams=[];for(let k=k1;k<=k2;k++)beams.push(beam(k));
+    const nb=beams.length, E=P.ax*B+P.bx*B*B;
+    const i1=Math.round(k1*P.spacing/dz), i2=Math.round(k2*P.spacing/dz)-3;
+    const pts=[];for(let i=i1;i<=i2;i+=2)pts.push(i);
+    const np=pts.length;
+    // normal matrix
+    const AtA=new Float64Array(nb*nb);
+    for(let a=0;a<nb;a++)for(let b=a;b<nb;b++){let s=0;const Ta=beams[a].T,Tb=beams[b].T;for(const i of pts)s+=Ta[i]*Tb[i];AtA[a*nb+b]=s;AtA[b*nb+a]=s;}
+    let tr=0;for(let a=0;a<nb;a++)tr+=AtA[a*nb+a];const lam=P.reg*tr/nb;
+    const M=AtA.slice();
+    for(let a=0;a<nb-1;a++){M[a*nb+a]+=lam;M[(a+1)*nb+a+1]+=lam;M[a*nb+a+1]-=lam;M[(a+1)*nb+a]-=lam;}
+    const w=new Float64Array(nb).fill(0.03), D=new Float64Array(N), LD=new Float64Array(N), target=new Float64Array(N).fill(B/2.5), Atb=new Float64Array(nb);
+    const acc=()=>{D.fill(0);LD.fill(0);for(let b=0;b<nb;b++){const be=beams[b],x=w[b];if(!x)continue;for(let i=0;i<N;i++){D[i]+=x*be.T[i];LD[i]+=x*be.TL[i];}}};
+    for(let it=0;it<outer;it++){
+      for(let a=0;a<nb;a++){let s=0;const Ta=beams[a].T;for(const i of pts)s+=Ta[i]*target[i];Atb[a]=s;}
+      for(let sweep=0;sweep<P.sweeps;sweep++)for(let a=0;a<nb;a++){let s=Atb[a];for(let b=0;b<nb;b++)if(b!==a)s-=M[a*nb+b]*w[b];w[a]=Math.max(0,s/M[a*nb+a]);}
+      acc();
+      for(const i of pts){const d=D[i],a=alphaC(d>1e-9?LD[i]/d:20);const nt=(-a+Math.sqrt(a*a+4*P.bx*E))/(2*P.bx);target[i]=it===0?nt:P.damp*nt+(1-P.damp)*target[i];}
+    }
+    const Phi=new Float64Array(N);
+    for(let b=0;b<nb;b++){const x=w[b]; if(!x) continue; const F=beams[b].F; for(let i=0;i<N;i++) Phi[i]+=x*F[i];}
+    const bio=new Float64Array(N),rbe=new Float64Array(N),let_=new Float64Array(N);
+    for(let i=0;i<N;i++){const d=D[i];if(d<1e-6){rbe[i]=NaN;let_[i]=NaN;continue;}
+      const L=LD[i]/d,a=alphaC(L),e=a*d+P.bx*d*d,dx=(-P.ax+Math.sqrt(P.ax*P.ax+4*P.bx*e))/(2*P.bx);bio[i]=dx;rbe[i]=dx/d;let_[i]=L;}
+    return {D,bio,rbe,let_,Phi,beams,wts:w,z1:k1*P.spacing,z2:k2*P.spacing,B};
+  }
+
+// ================= state =================
+const DEF={z1:8,z2:14,B:3.6};
+const S={z1:DEF.z1,z2:DEF.z2,B:DEF.B,peaks:'3',common:false,hover:null,res:null};
+const ZMIN_START=2, ZMAX_END=24, MINW=1.0, STEP=0.2;
+const snap=v=>Math.round(v/STEP)*STEP;
+
+// ================= chart =================
+const $=id=>document.getElementById(id);
+const at=z=>Math.max(0,Math.min(N-1,Math.round(z/dz)));
+const cv=$('cv'), cv2=$('cv2'), ctx1=cv.getContext('2d'), ctx2=cv2.getContext('2d');
+const M={l:50,r:98,t:30,b:44};
+let W=0, narrow=false, fluExp=7;
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const X=z=>M.l+(z/ZMAX)*(W-M.l-M.r);
+const Xinv=px=>Math.min(ZMAX,Math.max(0,(px-M.l)/(W-M.l-M.r)*ZMAX));
+function niceMax(v,steps=5){
+  const raw=v/steps, mag=Math.pow(10,Math.floor(Math.log10(raw))), f=raw/mag;
+  const st=(f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*mag; return {max:Math.ceil(v/st)*st,step:st};
+}
+function fmt(v,step){const d=step<0.1?2:step<1?1:0; return v.toFixed(d);}
+const SUP={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻'};
+const sup=n=>String(n).split('').map(c=>SUP[c]||c).join('');
+
+function prep(c,ctx){
+  const dpr=window.devicePixelRatio||1, w=c.clientWidth, hgt=c.clientHeight;
+  if(c.width!==Math.round(w*dpr)||c.height!==Math.round(hgt*dpr)){c.width=Math.round(w*dpr); c.height=Math.round(hgt*dpr);}
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,hgt);
+  return hgt;
+}
+// axes: [left, right1, right2], each {s, color, unit}; grid follows the left axis
+function frame(ctx,H,C,r,axes){
+  const fs=narrow?10:11, mono=`${fs}px "IBM Plex Mono", ui-monospace, monospace`, sans=`500 ${fs}px "IBM Plex Sans", system-ui, sans-serif`;
+  const top=M.t, bot=H-M.b, ph=bot-top, Y=(v,s)=>bot-(v/s.max)*ph;
+  ctx.fillStyle=C.band; ctx.fillRect(X(r.z1),top,X(r.z2)-X(r.z1),ph);
+  ctx.strokeStyle=C.grid; ctx.lineWidth=1;
+  const g=axes[0].s;
+  for(let v=0; v<=g.max+1e-9; v+=g.step){const y=Math.round(Y(v,g))+.5; ctx.beginPath(); ctx.moveTo(M.l,y); ctx.lineTo(W-M.r,y); ctx.stroke();}
+  for(let z=0; z<=ZMAX; z+=2){const x=Math.round(X(z))+.5; ctx.beginPath(); ctx.moveTo(x,top); ctx.lineTo(x,bot); ctx.stroke();}
+  ctx.strokeStyle=C.rule; ctx.beginPath(); ctx.moveTo(M.l+.5,top); ctx.lineTo(M.l+.5,bot+.5); ctx.lineTo(W-M.r+.5,bot+.5); ctx.lineTo(W-M.r+.5,top); ctx.stroke();
+  const xR2=W-M.r+(narrow?42:48);
+  ctx.beginPath(); ctx.moveTo(xR2+.5,top); ctx.lineTo(xR2+.5,bot); ctx.stroke();
+  ctx.fillStyle=C.muted; ctx.font=mono; ctx.textAlign='center'; ctx.textBaseline='top';
+  for(let z=0; z<=ZMAX; z+=(narrow?4:2)) ctx.fillText(String(z),X(z),bot+5);
+  ctx.font=sans; ctx.fillText('Depth in water (cm)',(M.l+W-M.r)/2,bot+22);
+  const pos=[[M.l-6,'right'],[W-M.r+6,'left'],[xR2+6,'left']];
+  axes.forEach((ax,k)=>{const [x,al]=pos[k];
+    ctx.fillStyle=ax.color; ctx.font=mono; ctx.textAlign=al; ctx.textBaseline='middle';
+    for(let v=0; v<=ax.s.max+1e-9; v+=ax.s.step) ctx.fillText(fmt(v,ax.s.step),x,Y(v,ax.s));
+    ctx.font=sans; ctx.textBaseline='alphabetic'; ctx.fillText(ax.unit,x,top-10);});
+  return {top,bot,ph,Y,mono};
+}
+function line(ctx,f,arr,s,color,width,mask,dash,alpha){
+  ctx.strokeStyle=color; ctx.lineWidth=width; ctx.lineJoin='round'; ctx.setLineDash(dash||[]); ctx.globalAlpha=alpha==null?1:alpha;
+  ctx.beginPath(); let pen=false;
+  for(let i=0;i<N;i++){const v=arr[i]; if(!isFinite(v)||(mask&&!mask(i))){pen=false; continue;}
+    const x=X(Z[i]), y=f.Y(v,s); pen?ctx.lineTo(x,y):ctx.moveTo(x,y); pen=true;}
+  ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1;
+}
+function clip(ctx,f){ctx.save(); ctx.beginPath(); ctx.rect(M.l,f.top-2,W-M.l-M.r,f.ph+3); ctx.clip();}
+function crosshair(ctx,f,C,dots){
+  if(S.hover==null) return; const i=S.hover, x=X(Z[i]);
+  ctx.strokeStyle=C.muted; ctx.globalAlpha=.6; ctx.setLineDash([2,3]); ctx.beginPath(); ctx.moveTo(x+.5,f.top); ctx.lineTo(x+.5,f.bot); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1;
+  for(const [v,s,c] of dots){ if(!isFinite(v)) continue; ctx.fillStyle=C.panel; ctx.strokeStyle=c; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,f.Y(v,s),4,0,7); ctx.fill(); ctx.stroke(); }
+}
+
+function draw(){
+  const r=S.res; if(!r) return;
+  W=cv.clientWidth; narrow=W<520;
+  M.r=narrow?86:98; M.l=narrow?42:50;
+  const C={ink:css('--ink'),muted:css('--muted'),grid:css('--grid'),rule:css('--rule'),band:css('--band'),phys:css('--phys'),bio:css('--bio'),rbe:css('--rbe'),flu:css('--flu'),let:css('--let'),panel:css('--panel')};
+
+  let maxD=0, maxB=0, maxR=0, maxL=0, maxF=0;
+  for(let i=0;i<N;i++){ if(r.D[i]>maxD) maxD=r.D[i]; if(r.bio[i]>maxB) maxB=r.bio[i]; if(r.Phi[i]>maxF) maxF=r.Phi[i]; }
+  const live=i=>r.D[i]>0.005*maxD, solid=i=>r.D[i]>0.02*maxD;
+  for(let i=0;i<N;i++){ if(solid(i)){ if(r.rbe[i]>maxR) maxR=r.rbe[i]; if(r.let_[i]>maxL) maxL=r.let_[i]; } }
+  let sD=niceMax(maxD*1.08), sB=niceMax(maxB*1.08);
+  if(S.common){const m=niceMax(Math.max(maxD,maxB)*1.08); sD=m; sB=m;}
+  const sR=niceMax(Math.max(maxR*1.05,2),5);
+  const sDp=niceMax(maxD*1.08);
+
+  // ---- chart 1: dose and RBE ----
+  {const H=prep(cv,ctx1), ctx=ctx1;
+   const f=frame(ctx,H,C,r,[{s:sD,color:C.phys,unit:'Gy'},{s:sB,color:C.bio,unit:'Gy(RBE)'},{s:sR,color:C.rbe,unit:'RBE'}]);
+   clip(ctx,f);
+   line(ctx,f,r.D,sD,C.phys,2.4);
+   line(ctx,f,r.bio,sB,C.bio,2.4);
+   line(ctx,f,r.rbe,sR,C.rbe,2.2,live);
+   ctx.restore();
+   crosshair(ctx,f,C,[[r.D[S.hover],sD,C.phys],[r.bio[S.hover],sB,C.bio],[S.hover!=null&&live(S.hover)?r.rbe[S.hover]:NaN,sR,C.rbe]]);}
+
+  // ---- chart 2: fluence, LET, physical dose ----
+  {const H=prep(cv2,ctx2), ctx=ctx2;
+   fluExp=Math.floor(Math.log10(maxF||1));
+   const k=Math.pow(10,fluExp);
+   $('fluUnit').textContent=`×10${sup(fluExp)} ions/cm²`;
+   const sF=niceMax(maxF/k*1.1), sL=niceMax(maxL*1.08);
+   const PhiS=r.Phi.map(v=>v/k);
+   const f=frame(ctx,H,C,r,[{s:sDp,color:C.phys,unit:'Gy'},{s:sF,color:C.flu,unit:'Φ'},{s:sL,color:C.let,unit:'LET'}]);
+   clip(ctx,f);
+   const nb=r.beams.length; let idx=[];
+   if(S.peaks==='all') idx=[...Array(nb).keys()];
+   else if(S.peaks==='3') idx=[...new Set([0,Math.round((nb-1)/2),nb-1])];
+   const a=S.peaks==='all'?0.32:0.8;
+   for(const b of idx){const be=r.beams[b], w=r.wts[b];
+     line(ctx,f,be.T.map(v=>w*v),sDp,C.phys,1.1,null,[4,3],a);
+     line(ctx,f,be.F.map(v=>w*v/k),sF,C.flu,1.1,null,[4,3],a);}
+   line(ctx,f,r.D,sDp,C.phys,2.2);
+   line(ctx,f,PhiS,sF,C.flu,2.4);
+   line(ctx,f,r.let_,sL,C.let,2.2,live);
+   if(S.peaks==='3' && !narrow){ ctx.font=f.mono; ctx.fillStyle=C.phys; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.globalAlpha=.85;
+     for(const b of idx){const be=r.beams[b], w=r.wts[b]; const y=f.Y(w*be.T[at(be.R-0.05)],sDp)-4; ctx.fillText(`R ${be.R.toFixed(1)}`,X(be.R),y);}
+     ctx.globalAlpha=1; }
+   ctx.restore();
+   const hv=S.hover;
+   crosshair(ctx,f,C,[[r.D[hv],sDp,C.phys],[hv!=null?PhiS[hv]:NaN,sF,C.flu],[hv!=null&&live(hv)?r.let_[hv]:NaN,sL,C.let]]);}
+
+  placeSlider();
+}
+
+// ================= readouts =================
+function readouts(){
+  const r=S.res, mid=(r.z1+r.z2)/2;
+  const i=S.hover!=null?S.hover:at(mid);
+  $('probeTitle').textContent=S.hover!=null?'At cursor':'At mid-SOBP';
+  $('pz').textContent=Z[i].toFixed(2)+' cm';
+  $('pd').textContent=r.D[i].toFixed(2)+' Gy';
+  $('pb').textContent=r.bio[i].toFixed(2)+' Gy(RBE)';
+  $('pr').textContent=isFinite(r.rbe[i])&&r.D[i]>0.01?r.rbe[i].toFixed(2):'–';
+  $('pf').textContent=r.Phi[i]>1e3?(r.Phi[i]/Math.pow(10,fluExp)).toFixed(2)+' ×10'+sup(fluExp)+' /cm²':'–';
+  $('pl').textContent=isFinite(r.let_[i])&&r.D[i]>0.01?r.let_[i].toFixed(0)+' keV/µm':'–';
+  const iP=at(r.z1+0.3), iM=at(mid), iD=at(r.z2-0.5), iE=at(1);
+  $('sEnt').textContent=r.rbe[iE].toFixed(2);
+  $('sPro').textContent=r.rbe[iP].toFixed(2);
+  $('sMid').textContent=r.rbe[iM].toFixed(2);
+  $('sDis').textContent=r.rbe[iD].toFixed(2);
+  $('sTilt').textContent=(r.D[iP]/r.D[iD]).toFixed(2)+' ×';
+  $('sFlu').textContent=(r.Phi[iP]/r.Phi[iD]).toFixed(2)+' ×';
+  $('sLet').textContent=(r.let_[iD]/r.let_[iP]).toFixed(2)+' ×';
+  $('sEtr').textContent=(r.bio[iE]/r.B).toFixed(2);
+}
+
+// ================= compute scheduling =================
+let pending=false, fast=false;
+function recompute(isFast){
+  fast=isFast; if(pending) return; pending=true;
+  requestAnimationFrame(()=>{pending=false;
+    S.res=solve(S.z1,S.z2,S.B,fast?8:16);
+    draw(); readouts();});
+}
+
+// ================= dual slider =================
+const track=$('track'), fill=$('fill'), h1=$('h1'), h2=$('h2'), t1=$('t1'), t2=$('t2');
+function placeSlider(){
+  const pw=W-M.l-M.r;
+  track.style.left=M.l+'px'; track.style.width=pw+'px';
+  const p1=S.z1/ZMAX*pw, p2=S.z2/ZMAX*pw;
+  h1.style.left=p1+'px'; h2.style.left=p2+'px';
+  fill.style.left=p1+'px'; fill.style.width=(p2-p1)+'px';
+  const narrowGap=(p2-p1)<120;
+  t1.style.left=(M.l+p1-(narrowGap?28:0))+'px'; t2.style.left=(M.l+p2+(narrowGap?28:0))+'px';
+  t1.innerHTML=`<small>Start</small>${S.z1.toFixed(1)} cm`;
+  t2.innerHTML=`<small>End</small>${S.z2.toFixed(1)} cm`;
+  for(const [h,v,lo,hi] of [[h1,S.z1,ZMIN_START,S.z2-MINW],[h2,S.z2,S.z1+MINW,ZMAX_END]]){
+    h.setAttribute('aria-valuenow',v.toFixed(1)); h.setAttribute('aria-valuemin',lo.toFixed(1)); h.setAttribute('aria-valuemax',hi.toFixed(1)); h.setAttribute('aria-valuetext',v.toFixed(1)+' cm');}
+}
+function setEdges(a,b,isFast){
+  a=snap(a); b=snap(b);
+  if(S.z1===a&&S.z2===b) return;
+  S.z1=+a.toFixed(1); S.z2=+b.toFixed(1); placeSlider(); recompute(isFast);
+}
+function trackZ(clientX){const r=track.getBoundingClientRect(); return Math.min(ZMAX,Math.max(0,(clientX-r.left)/r.width*ZMAX));}
+function dragHandle(which){
+  return e=>{e.preventDefault(); const el=e.currentTarget; el.setPointerCapture(e.pointerId); el.focus();
+    const move=ev=>{const z=trackZ(ev.clientX);
+      if(which===1) setEdges(Math.max(ZMIN_START,Math.min(z,S.z2-MINW)),S.z2,true);
+      else setEdges(S.z1,Math.min(ZMAX_END,Math.max(z,S.z1+MINW)),true);};
+    const up=()=>{el.removeEventListener('pointermove',move); el.removeEventListener('pointerup',up); el.removeEventListener('pointercancel',up); recompute(false);};
+    el.addEventListener('pointermove',move); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);};
+}
+h1.addEventListener('pointerdown',dragHandle(1));
+h2.addEventListener('pointerdown',dragHandle(2));
+fill.addEventListener('pointerdown',e=>{e.preventDefault(); fill.setPointerCapture(e.pointerId);
+  const z0=trackZ(e.clientX), a0=S.z1, b0=S.z2, w=b0-a0;
+  const move=ev=>{let d=trackZ(ev.clientX)-z0; let a=a0+d; a=Math.max(ZMIN_START,Math.min(a,ZMAX_END-w)); setEdges(a,a+w,true);};
+  const up=()=>{fill.removeEventListener('pointermove',move); fill.removeEventListener('pointerup',up); fill.removeEventListener('pointercancel',up); recompute(false);};
+  fill.addEventListener('pointermove',move); fill.addEventListener('pointerup',up); fill.addEventListener('pointercancel',up);});
+for(const [h,which] of [[h1,1],[h2,2]]){
+  h.addEventListener('keydown',e=>{
+    const k=e.key; let d=0;
+    if(k==='ArrowRight'||k==='ArrowUp') d=STEP; else if(k==='ArrowLeft'||k==='ArrowDown') d=-STEP;
+    else if(k==='PageUp') d=1; else if(k==='PageDown') d=-1; else return;
+    e.preventDefault();
+    if(which===1) setEdges(Math.max(ZMIN_START,Math.min(S.z1+d,S.z2-MINW)),S.z2,false);
+    else setEdges(S.z1,Math.min(ZMAX_END,Math.max(S.z2+d,S.z1+MINW)),false);
+  });
+}
+
+// ================= other controls =================
+const dose=$('dose'), doseOut=$('doseOut');
+dose.addEventListener('input',()=>{S.B=+dose.value; doseOut.textContent=S.B.toFixed(1)+' Gy(RBE)'; recompute(true);});
+dose.addEventListener('change',()=>recompute(false));
+const peakBtns={'3':$('peaks3'),'all':$('peaksAll'),'none':$('peaksNone')};
+for(const [k,b] of Object.entries(peakBtns)) b.addEventListener('click',()=>{S.peaks=k; for(const [kk,bb] of Object.entries(peakBtns)) bb.setAttribute('aria-pressed',String(kk===k)); draw();});
+$('scaleSep').addEventListener('click',()=>{S.common=false; $('scaleSep').setAttribute('aria-pressed','true'); $('scaleCommon').setAttribute('aria-pressed','false'); draw();});
+$('scaleCommon').addEventListener('click',()=>{S.common=true; $('scaleSep').setAttribute('aria-pressed','false'); $('scaleCommon').setAttribute('aria-pressed','true'); draw();});
+$('reset').addEventListener('click',()=>{S.B=DEF.B; dose.value=DEF.B; doseOut.textContent=DEF.B.toFixed(1)+' Gy(RBE)'; S.z1=DEF.z1; S.z2=DEF.z2; S.hover=null; recompute(false);});
+
+// hover probe
+function probe(e){const rect=e.currentTarget.getBoundingClientRect(); const x=e.clientX-rect.left;
+  if(x<M.l||x>W-M.r){S.hover=null;} else S.hover=at(Xinv(x)); draw(); readouts();}
+for(const c of [cv,cv2]){
+  c.addEventListener('pointermove',probe);
+  c.addEventListener('pointerdown',probe);
+  c.addEventListener('pointerleave',()=>{S.hover=null; draw(); readouts();});
+}
+
+// redraw on resize / theme change / font load
+{const ro=new ResizeObserver(()=>draw()); ro.observe(cv); ro.observe(cv2);}
+try{ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw); }catch(_){}
+new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(draw);
+
+recompute(false);
+})();
+</script>
+
+</body>
+</html>
